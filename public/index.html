@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paid Up - invoices that get paid</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{--bg:#f6f7f5;--card:#fff;--text:#14201a;--muted:#6b776f;--line:#e3e8e4;--green:#12805c;--green2:#0d6648;--red:#c0392b;--amber:#b7791f}
+[data-theme=dark]{--bg:#0e1512;--card:#17211c;--text:#e9f1ec;--muted:#8fa196;--line:#25332b;--green:#2fbf8f;--green2:#25a177;--red:#ef6a5b;--amber:#e0a23c}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text);font-size:16px}
+header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+header b{font-size:20px;color:var(--green)}
+main{max-width:640px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
+h2{margin:0 0 10px;font-size:18px}
+label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+input,select,textarea{width:100%;padding:11px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--text);font:inherit}
+button{padding:11px 16px;border:0;border-radius:10px;background:var(--green);color:#fff;font:inherit;font-weight:600;cursor:pointer}
+button:hover{background:var(--green2)}
+button.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}
+button.small{padding:7px 11px;font-size:14px}
+.row{display:flex;gap:8px;align-items:center}
+.row>*{flex:1}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.stat{background:var(--bg);border-radius:10px;padding:10px}
+.stat small{color:var(--muted);display:block}
+.stat div{font-weight:700;font-size:14px;margin-top:2px}
+.inv{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-top:1px solid var(--line);cursor:pointer}
+.inv:first-of-type{border-top:0}
+.badge{font-size:12px;padding:3px 8px;border-radius:99px;font-weight:600}
+.b-awaiting{background:#fff4d6;color:var(--amber)}
+.b-overdue{background:#fde3df;color:var(--red)}
+.b-paid{background:#d9f3e9;color:var(--green)}
+.hidden{display:none!important}
+.muted{color:var(--muted)}
+.err{color:var(--red);font-size:14px;margin-top:8px}
+.doc{background:#fff;color:#14201a;border-radius:14px;padding:22px;position:relative;border:1px solid var(--line)}
+.doc table{width:100%;border-collapse:collapse;margin:14px 0}
+.doc th,.doc td{text-align:left;padding:8px 4px;border-bottom:1px solid #e3e8e4;font-size:14px}
+.doc td.r,.doc th.r{text-align:right}
+.stamp{position:absolute;top:70px;right:20px;border:4px solid #12805c;color:#12805c;padding:4px 14px;font-weight:800;font-size:26px;border-radius:8px;transform:rotate(-12deg);opacity:.85}
+.foot{margin-top:18px;font-size:12px;color:#6b776f;text-align:center}
+.tot{text-align:right;font-size:18px;font-weight:800}
+.item{display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:6px;margin-bottom:6px}
+@media print{header,.noprint{display:none!important}body{background:#fff}.doc{border:0}}
+</style>
+</head>
+<body>
+<header>
+  <b>Paid Up</b>
+  <div class="row" style="flex:0">
+    <button class="ghost small" id="themeBtn">Theme</button>
+    <button class="ghost small hidden" id="outBtn">Sign out</button>
+  </div>
+</header>
+<main>
+
+<!-- SIGN IN -->
+<section id="authView" class="card hidden">
+  <h2>Invoices that get paid</h2>
+  <p class="muted">Sign in or create an account to start invoicing.</p>
+  <label>Email</label><input id="email" type="email" autocomplete="email">
+  <label>Password</label><input id="pass" type="password" autocomplete="current-password">
+  <div class="row" style="margin-top:14px">
+    <button id="signInBtn">Sign in</button>
+    <button id="signUpBtn" class="ghost">Create account</button>
+  </div>
+  <div id="authErr" class="err"></div>
+</section>
+
+<!-- DASHBOARD -->
+<section id="homeView" class="hidden">
+  <div class="card">
+    <h2>Dashboard <span id="planTag" class="badge b-awaiting">Free</span></h2>
+    <div id="stats"></div>
+    <button id="newBtn" style="margin-top:12px;width:100%">+ New invoice</button>
+  </div>
+  <div class="card"><h2>Invoices</h2><div id="list"></div></div>
+  <div class="card">
+    <h2>Business profile</h2>
+    <label>Your name or business</label><input id="bizName">
+    <label>Default currency</label>
+    <select id="defCur"><option>KES</option><option>USD</option><option>GBP</option></select>
+    <button id="saveProfile" class="small" style="margin-top:12px">Save profile</button>
+  </div>
+</section>
+
+<!-- NEW INVOICE -->
+<section id="formView" class="card hidden">
+  <h2>New invoice <span id="nextNo" class="muted"></span></h2>
+  <label>Client name</label><input id="cName">
+  <label>Client email</label><input id="cEmail" type="email">
+  <div class="row">
+    <div><label>Issue date</label><input id="issue" type="date"></div>
+    <div><label>Due date</label><input id="due" type="date"></div>
+  </div>
+  <div class="row">
+    <div><label>Currency</label><select id="cur"><option>KES</option><option>USD</option><option>GBP</option></select></div>
+    <div><label>Tax %</label><input id="tax" type="number" min="0" step="0.1" value="0"></div>
+  </div>
+  <label>Line items (description, qty, price)</label>
+  <div id="items"></div>
+  <button class="ghost small" id="addItem">+ Add line</button>
+  <label>Note to client</label><textarea id="note" rows="3"></textarea>
+  <div class="row" style="margin-top:14px">
+    <button id="saveInv">Save invoice</button>
+    <button id="cancelInv" class="ghost">Cancel</button>
+  </div>
+  <div id="formErr" class="err"></div>
+</section>
+
+<!-- INVOICE DOCUMENT -->
+<section id="docView" class="hidden">
+  <div class="row noprint" style="margin-bottom:12px">
+    <button class="ghost small" id="backBtn">Back</button>
+    <button class="small" id="paidBtn">Mark paid</button>
+    <button class="ghost small" id="remindBtn">Copy reminder</button>
+    <button class="ghost small" id="printBtn">Print / PDF</button>
+  </div>
+  <div id="doc" class="doc"></div>
+  <div id="toast" class="muted noprint" style="margin-top:10px"></div>
+</section>
+
+<!-- PAYWALL -->
+<section id="payView" class="card hidden">
+  <h2>Go Pro</h2>
+  <p>Free accounts get 3 invoices. Pro is <b>KES 999 a month</b> with unlimited invoices and no Paid Up footer.</p>
+  <button id="payBtn" style="width:100%">Pay with M-Pesa or card</button>
+  <p class="muted">Your account upgrades automatically after payment. No code needed.</p>
+  <button class="ghost small" id="payBack">Not now</button>
+  <div id="payErr" class="err"></div>
+</section>
+
+</main>
+<script>
+const SUPABASE_URL = 'https://gudtccpwndbrozkcosgg.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_i_MssYMVxzfOMLBrSnxhxQ_BmEqbzn7';
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const $ = id => document.getElementById(id);
+const SYM = { KES: 'KES ', USD: '$', GBP: '£' };
+let user, profile, invoices = [], current = null;
+
+function show(id) {
+  ['authView','homeView','formView','docView','payView'].forEach(v => $(v).classList.add('hidden'));
+  $(id).classList.remove('hidden');
+  window.scrollTo(0, 0);
+}
+const money = (n, c) => (SYM[c] || '') + Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+const pad = n => String(n).padStart(3, '0');
+const today = () => new Date().toISOString().slice(0, 10);
+const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x.toISOString().slice(0, 10); };
+
+function totals(inv) {
+  const sub = (inv.items || []).reduce((s, i) => s + i.qty * i.price, 0);
+  const tax = sub * (Number(inv.tax_percent) || 0) / 100;
+  return { sub, tax, total: sub + tax };
+}
+function statusOf(inv) {
+  if (inv.status === 'paid') return 'paid';
+  return inv.due_date < today() ? 'overdue' : 'awaiting';
+}
+
+/* Theme */
+function setTheme(t) { document.documentElement.dataset.theme = t; localStorage.setItem('pu_theme', t); }
+setTheme(localStorage.getItem('pu_theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+$('themeBtn').onclick = () => setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+
+/* Auth */
+$('signInBtn').onclick = async () => {
+  $('authErr').textContent = '';
+  const { error } = await db.auth.signInWithPassword({ email: $('email').value.trim(), password: $('pass').value });
+  if (error) $('authErr').textContent = error.message;
+};
+$('signUpBtn').onclick = async () => {
+  $('authErr').textContent = '';
+  if ($('pass').value.length < 6) { $('authErr').textContent = 'Password needs at least 6 characters.'; return; }
+  const { error } = await db.auth.signUp({ email: $('email').value.trim(), password: $('pass').value });
+  if (error) $('authErr').textContent = error.message;
+};
+$('outBtn').onclick = () => db.auth.signOut();
+
+db.auth.onAuthStateChange((_e, session) => {
+  user = session?.user || null;
+  $('outBtn').classList.toggle('hidden', !user);
+  if (user) loadAll(); else show('authView');
+});
+
+/* Load data */
+async function loadAll() {
+  const p = await db.from('profiles').select('*').eq('id', user.id).single();
+  profile = p.data || { business_name: '', default_currency: 'KES', is_pro: false };
+  const i = await db.from('invoices').select('*').order('number', { ascending: false });
+  invoices = i.data || [];
+  $('bizName').value = profile.business_name;
+  $('defCur').value = profile.default_currency;
+  $('planTag').textContent = profile.is_pro ? 'Pro' : 'Free';
+  $('planTag').className = 'badge ' + (profile.is_pro ? 'b-paid' : 'b-awaiting');
+  renderHome();
+  show('homeView');
+  if (new URLSearchParams(location.search).get('paid')) {
+    history.replaceState({}, '', '/');
+    setTimeout(loadAll, 4000); // give the webhook a moment, then refresh Pro status
+  }
+}
+
+function renderHome() {
+  const by = {};
+  invoices.forEach(inv => {
+    const c = inv.currency, t = totals(inv).total, s = statusOf(inv);
+    by[c] = by[c] || { waiting: 0, overdue: 0, paid: 0 };
+    if (s === 'paid') by[c].paid += t;
+    else if (s === 'overdue') { by[c].overdue += t; by[c].waiting += t; }
+    else by[c].waiting += t;
+  });
+  const cs = Object.keys(by);
+  $('stats').innerHTML = cs.length ? cs.map(c => `
+    <div class="muted" style="margin:8px 0 4px">${c}</div>
+    <div class="stats">
+      <div class="stat"><small>Waiting</small><div>${money(by[c].waiting, c)}</div></div>
+      <div class="stat"><small>Overdue</small><div>${money(by[c].overdue, c)}</div></div>
+      <div class="stat"><small>Collected</small><div>${money(by[c].paid, c)}</div></div>
+    </div>`).join('') : '<p class="muted">No invoices yet. Create your first one.</p>';
+
+  $('list').innerHTML = invoices.length ? invoices.map(inv => {
+    const s = statusOf(inv);
+    const label = { awaiting: 'Awaiting payment', overdue: 'Overdue', paid: 'Paid' }[s];
+    return `<div class="inv" data-id="${inv.id}">
+      <div><b>INV ${pad(inv.number)}</b> · ${esc(inv.client_name)}<br><span class="muted">Due ${inv.due_date}</span></div>
+      <div style="text-align:right">${money(totals(inv).total, inv.currency)}<br><span class="badge b-${s}">${label}</span></div>
+    </div>`;
+  }).join('') : '<p class="muted">Nothing here yet.</p>';
+  document.querySelectorAll('.inv').forEach(el => el.onclick = () => openInvoice(el.dataset.id));
+}
+
+/* Profile */
+$('saveProfile').onclick = async () => {
+  await db.from('profiles').update({ business_name: $('bizName').value.trim(), default_currency: $('defCur').value }).eq('id', user.id);
+  profile.business_name = $('bizName').value.trim();
+  profile.default_currency = $('defCur').value;
+  $('saveProfile').textContent = 'Saved';
+  setTimeout(() => $('saveProfile').textContent = 'Save profile', 1200);
+};
+
+/* New invoice */
+function itemRow(d = '', q = 1, p = '') {
+  const div = document.createElement('div');
+  div.className = 'item';
+  div.innerHTML = `<input placeholder="Description" value="${esc(d)}"><input type="number" min="0" step="any" value="${q}"><input type="number" min="0" step="any" placeholder="Price" value="${p}"><button class="ghost small" type="button">x</button>`;
+  div.querySelector('button').onclick = () => div.remove();
+  $('items').appendChild(div);
+}
+$('addItem').onclick = () => itemRow();
+
+$('newBtn').onclick = () => {
+  if (!profile.is_pro && invoices.length >= 3) { show('payView'); return; }
+  const next = (invoices[0]?.number || 0) + 1;
+  $('nextNo').textContent = 'INV ' + pad(next);
+  ['cName','cEmail','note'].forEach(i => $(i).value = '');
+  $('tax').value = 0;
+  $('cur').value = profile.default_currency;
+  $('issue').value = today();
+  $('due').value = addDays(today(), 14);
+  $('items').innerHTML = '';
+  itemRow();
+  $('formErr').textContent = '';
+  show('formView');
+};
+$('cancelInv').onclick = () => show('homeView');
+
+$('saveInv').onclick = async () => {
+  const items = [...document.querySelectorAll('#items .item')].map(r => {
+    const f = r.querySelectorAll('input');
+    return { desc: f[0].value.trim(), qty: Number(f[1].value) || 0, price: Number(f[2].value) || 0 };
+  }).filter(i => i.desc && i.qty > 0);
+  if (!$('cName').value.trim()) { $('formErr').textContent = 'Add a client name.'; return; }
+  if (!items.length) { $('formErr').textContent = 'Add at least one line item.'; return; }
+  const number = (invoices[0]?.number || 0) + 1;
+  const { error } = await db.from('invoices').insert({
+    number, client_name: $('cName').value.trim(), client_email: $('cEmail').value.trim(),
+    currency: $('cur').value, issue_date: $('issue').value, due_date: $('due').value,
+    items, tax_percent: Number($('tax').value) || 0, note: $('note').value.trim()
+  });
+  if (error) {
+    if (String(error.message).includes('FREE_LIMIT_REACHED')) { show('payView'); return; }
+    $('formErr').textContent = error.message; return;
+  }
+  await loadAll();
+};
+
+/* Invoice document */
+function openInvoice(id) {
+  current = invoices.find(i => i.id === id);
+  const inv = current, t = totals(inv), s = statusOf(inv);
+  $('doc').innerHTML = `
+    ${s === 'paid' ? '<div class="stamp">PAID</div>' : ''}
+    <h2 style="margin:0">INVOICE</h2>
+    <div><b>INV ${pad(inv.number)}</b></div>
+    <p style="margin:10px 0"><b>From:</b> ${esc(profile.business_name || 'Your business')}<br>
+       <b>To:</b> ${esc(inv.client_name)}${inv.client_email ? '<br>' + esc(inv.client_email) : ''}<br>
+       <b>Issued:</b> ${inv.issue_date} &nbsp; <b>Due:</b> ${inv.due_date}</p>
+    <table><tr><th>Description</th><th class="r">Qty</th><th class="r">Price</th><th class="r">Amount</th></tr>
+    ${inv.items.map(i => `<tr><td>${esc(i.desc)}</td><td class="r">${i.qty}</td><td class="r">${money(i.price, inv.currency)}</td><td class="r">${money(i.qty * i.price, inv.currency)}</td></tr>`).join('')}
+    </table>
+    <div class="r" style="text-align:right">Subtotal ${money(t.sub, inv.currency)}<br>Tax (${inv.tax_percent}%) ${money(t.tax, inv.currency)}</div>
+    <div class="tot">Total ${money(t.total, inv.currency)}</div>
+    ${inv.note ? `<p style="margin-top:14px">${esc(inv.note)}</p>` : ''}
+    ${profile.is_pro ? '' : '<div class="foot">Created with Paid Up</div>'}`;
+  $('paidBtn').textContent = inv.status === 'paid' ? 'Mark unpaid' : 'Mark paid';
+  $('toast').textContent = '';
+  show('docView');
+}
+$('backBtn').onclick = () => show('homeView');
+$('printBtn').onclick = () => window.print();
+
+$('paidBtn').onclick = async () => {
+  const paid = current.status !== 'paid';
+  await db.from('invoices').update({ status: paid ? 'paid' : 'awaiting', paid_at: paid ? new Date().toISOString() : null }).eq('id', current.id);
+  const id = current.id;
+  await loadAll();
+  openInvoice(id);
+};
+
+$('remindBtn').onclick = async () => {
+  const inv = current, t = totals(inv).total;
+  const msg = `Hi ${inv.client_name}, a friendly reminder that invoice INV ${pad(inv.number)} for ${money(t, inv.currency)} was due on ${inv.due_date}. If you've already paid, thank you and please ignore this. Otherwise I'd really appreciate payment when you can. Thanks! ${profile.business_name || ''}`.trim();
+  try { await navigator.clipboard.writeText(msg); $('toast').textContent = 'Reminder copied. Paste it into WhatsApp or email.'; }
+  catch { prompt('Copy this reminder:', msg); }
+};
+
+/* Paywall and Paystack checkout */
+$('payBack').onclick = () => show('homeView');
+$('payBtn').onclick = async () => {
+  $('payErr').textContent = '';
+  $('payBtn').textContent = 'Opening checkout...';
+  const { data: { session } } = await db.auth.getSession();
+  const r = await fetch('/api/checkout', { method: 'POST', headers: { Authorization: 'Bearer ' + session.access_token } });
+  const out = await r.json();
+  $('payBtn').textContent = 'Pay with M-Pesa or card';
+  if (out.url) location.href = out.url; else $('payErr').textContent = out.error || 'Could not start checkout.';
+};
+</script>
+</body>
+</html>
